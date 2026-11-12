@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<!--
+  index.html — the STRUCTURE of the page (what is on the screen).
+  style.css  — the LOOK of the page (colors, spacing, fonts).
+  polymers.js — the LIST of plastic ingredients we search for.
+  app.js     — the BEHAVIOR of scanning (photo -> text -> results).
+  supabase-config.js — the address and public key of our Supabase project.
+  auth.js    — optional ACCOUNTS: sign up, log in, log out (uses Supabase).
+  saving.js  — SAVE scans and photos, and show "My saved scans" (uses Supabase).
+  supabase-setup.sql — run once in Supabase to create the table, photo bucket and security rules.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Makes the page fit phone screens properly -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Microplastic Minimizer</title>
+  <link rel="stylesheet" href="style.css?v=10">
+</head>
+<body>
+  <header>
+    <!-- Account bar: shows "Log in", or your email + "Log out" once logged in.
+         Hidden until Supabase is set up in supabase-config.js. -->
+    <div id="account-bar" hidden>
+      <span id="account-email"></span>
+      <button id="login-open-button" class="link-button">Log in</button>
+      <button id="logout-button" class="link-button" hidden>Log out</button>
+    </div>
+    <h1>🔬 Microplastic Minimizer</h1>
+    <p class="tagline">Snap a photo of an ingredient list or clothing tag. We'll flag hidden plastics.</p>
+  </header>
+
+  <main>
+    <!-- LOG IN / SIGN UP (optional). Hidden until you press "Log in". -->
+    <section id="auth-card" class="card" hidden>
+      <h2>Log in or create an account</h2>
+      <p class="hint">Accounts are optional — you only need one to save your scans.</p>
+      <!-- A <form> lets people press Enter to submit, and lets the browser offer saved passwords -->
+      <form id="auth-form">
+        <label for="auth-email">Email</label>
+        <input type="email" id="auth-email" autocomplete="email" required>
+
+        <label for="auth-password">Password (at least 6 characters)</label>
+        <input type="password" id="auth-password" autocomplete="current-password" minlength="6" required>
+
+        <div class="auth-buttons">
+          <button type="submit" class="button">Log in</button>
+          <button type="button" id="signup-button" class="button secondary">Create account</button>
+          <button type="button" id="auth-cancel-button" class="link-button dark">Cancel</button>
+        </div>
+      </form>
+      <!-- Success or error messages appear here -->
+      <p id="auth-message" class="auth-message" hidden></p>
+    </section>
+
+    <!-- STEP 1: Choose a photo -->
+    <section class="card">
+      <h2>1. Add a photo</h2>
+      <!-- accept="image/*" lets phones offer "Take Photo" or "Photo Library" -->
+      <label class="button" for="photo-input">📷 Take or choose a photo</label>
+      <input type="file" id="photo-input" accept="image/*" hidden>
+
+      <!-- The chosen photo is shown here so you can check it is readable -->
+      <img id="photo-preview" alt="Your photo" hidden>
+
+      <!-- Progress bar while the text reader (OCR) works -->
+      <div id="progress-area" hidden>
+        <p id="progress-label">Reading text…</p>
+        <progress id="progress-bar" max="100" value="0"></progress>
+      </div>
+    </section>
+
+    <!-- STEP 2: Results -->
+    <section class="card">
+      <h2>2. Results</h2>
+      <div id="results">
+        <p class="hint">No scan yet.</p>
+      </div>
+
+      <!-- SAVE: appears after a scan. Logged in → "Save this scan".
+           Logged out → "Log in to save". -->
+      <div id="save-area" hidden>
+        <button id="save-button" class="button">💾 Save this scan</button>
+        <button id="save-login-button" class="button secondary">Log in to save this scan</button>
+        <p id="save-message" class="auth-message" hidden></p>
+      </div>
+    </section>
+
+    <!-- MY SAVED SCANS: only shown when logged in -->
+    <section id="saved-card" class="card" hidden>
+      <h2>My saved scans</h2>
+      <ul id="saved-list"></ul>
+    </section>
+
+    <!-- SOURCES: answers "how do you know?" -->
+    <section class="card sources">
+      <h2>Where our list comes from</h2>
+      <p>
+        <strong>Microplastic</strong> (red) = on the Beat the Microbead <em>Red List</em>,
+        or a synthetic fabric fiber that sheds in the wash.
+        <strong>Watch</strong> (amber) = on the <em>Orange List</em>: synthetic polymers
+        where it's still unclear whether they break down in nature.
+      </p>
+      <ul>
+        <li>
+          <a href="https://www.beatthemicrobead.org/guide-to-microplastics/red-list/" target="_blank" rel="noopener">Beat the Microbead – Red List</a>
+          (Plastic Soup Foundation; based on UNEP, Tauw and ECHA research)
+        </li>
+        <li>
+          <a href="https://www.beatthemicrobead.org/guide-to-microplastics/orange-list/" target="_blank" rel="noopener">Beat the Microbead – Orange List</a>
+        </li>
+        <li>
+          <a href="https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-303/section-303.7" target="_blank" rel="noopener">US FTC – generic names for manufactured fibers (16 CFR 303.7)</a>
+        </li>
+        <li>
+          <a href="https://doi.org/10.1016/j.marpolbul.2016.09.025" target="_blank" rel="noopener">Napper &amp; Thompson (2016)</a>,
+          "Release of synthetic microplastic plastic fibres from domestic washing machines", Marine Pollution Bulletin
+        </li>
+      </ul>
+      <p class="hint">
+        There is no official complete list of microplastic ingredients. We check for the
+        most common ones, not all of the 1,000+ on the full lists.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Educational project. The watch-list is not exhaustive — always double-check labels.</p>
+  </footer>
+
+  <!-- Tesseract.js: a free library that reads text from images (OCR).
+       Loaded from a CDN (a public server), so there is nothing to install. -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <!-- Supabase: a free library that talks to our Supabase project (accounts and saving). -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+  <!-- Our own code. polymers.js must load before app.js because app.js uses its list,
+       and supabase-config.js must load before auth.js because auth.js uses its settings.
+       "?v=10" is a version number: bump it whenever you change a file, so browsers
+       download the new copy instead of reusing an old saved (cached) one. -->
+  <script src="polymers.js?v=10"></script>
+  <script src="app.js?v=10"></script>
+  <script src="supabase-config.js?v=10"></script>
+  <script src="saving.js?v=10"></script>
+  <script src="auth.js?v=10"></script>
+</body>
+</html>
