@@ -4,7 +4,8 @@
 
 // ---------- 1. Grab the parts of the page we need to work with ----------
 // document.getElementById finds an element by the id="" we gave it in index.html.
-const photoInput    = document.getElementById("photo-input");
+const cameraInput   = document.getElementById("camera-input");   // "Take a photo"
+const libraryInput  = document.getElementById("library-input");  // "Choose from photos"
 const photoPreview  = document.getElementById("photo-preview");
 const progressArea  = document.getElementById("progress-area");
 const progressLabel = document.getElementById("progress-label");
@@ -197,9 +198,10 @@ function showResults(found, text) {
 
 // ---------- 7. Connect everything to the buttons ----------
 
-// When the user picks or takes a photo...
-photoInput.addEventListener("change", async () => {
-  const file = photoInput.files[0];
+// When the user takes or picks a photo (either button), scan it.
+// "input" is whichever of the two file pickers was used.
+async function handlePhoto(input) {
+  const file = input.files[0];
   if (!file) return;
 
   // Show the photo on the page
@@ -223,5 +225,8 @@ photoInput.addEventListener("change", async () => {
       : '<p class="hint">Sorry, we could not read that photo. Try a sharper, well-lit picture.</p>';
   }
   // Clear the picker so choosing the SAME photo again still triggers a scan
-  photoInput.value = "";
-});
+  input.value = "";
+}
+
+cameraInput.addEventListener("change", () => handlePhoto(cameraInput));
+libraryInput.addEventListener("change", () => handlePhoto(libraryInput));

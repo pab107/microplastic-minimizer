@@ -64,6 +64,9 @@ main {
 }
 .button:hover { filter: brightness(1.1); }
 
+/* The two photo buttons side by side (they wrap onto two lines on narrow phones) */
+.photo-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+
 #photo-preview {
   display: block;
   max-width: 100%;

@@ -15,7 +15,7 @@
   <!-- Makes the page fit phone screens properly -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Microplastic Minimizer</title>
-  <link rel="stylesheet" href="style.css?v=10">
+  <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
   <header>
@@ -57,8 +57,15 @@
     <section class="card">
       <h2>1. Add a photo</h2>
       <!-- accept="image/*" lets phones offer "Take Photo" or "Photo Library" -->
-      <label class="button" for="photo-input">📷 Take or choose a photo</label>
-      <input type="file" id="photo-input" accept="image/*" hidden>
+      <!-- Two buttons, two hidden file pickers:
+           capture="environment" tells phones to open the BACK camera straight away.
+           Without it, phones open the photo library instead. -->
+      <div class="photo-buttons">
+        <label class="button" for="camera-input">📷 Take a photo</label>
+        <label class="button secondary" for="library-input">🖼️ Choose from photos</label>
+      </div>
+      <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+      <input type="file" id="library-input" accept="image/*" hidden>
 
       <!-- The chosen photo is shown here so you can check it is readable -->
       <img id="photo-preview" alt="Your photo" hidden>
@@ -135,12 +142,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
   <!-- Our own code. polymers.js must load before app.js because app.js uses its list,
        and supabase-config.js must load before auth.js because auth.js uses its settings.
-       "?v=10" is a version number: bump it whenever you change a file, so browsers
+       "?v=11" is a version number: bump it whenever you change a file, so browsers
        download the new copy instead of reusing an old saved (cached) one. -->
-  <script src="polymers.js?v=10"></script>
-  <script src="app.js?v=10"></script>
-  <script src="supabase-config.js?v=10"></script>
-  <script src="saving.js?v=10"></script>
-  <script src="auth.js?v=10"></script>
+  <script src="polymers.js?v=11"></script>
+  <script src="app.js?v=11"></script>
+  <script src="supabase-config.js?v=11"></script>
+  <script src="saving.js?v=11"></script>
+  <script src="auth.js?v=11"></script>
 </body>
 </html>
