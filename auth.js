@@ -15,8 +15,15 @@ const supabaseIsSetUp =
 if (!supabaseIsSetUp) {
   console.info("Supabase is not set up yet — fill in supabase-config.js to turn on accounts.");
 } else {
-  // "supabase" comes from the Supabase library loaded in index.html
-  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  // "supabase" comes from the Supabase library loaded in index.html.
+  // The "lock" setting: by default Supabase uses a browser "lock" so two tabs
+  // don't refresh the login at the same time. On phones that lock can get
+  // stuck after the browser goes to the background (e.g. while the camera app
+  // is open), and then every request waits forever. Our app is used in one
+  // tab, so we replace the lock with one that simply runs the task right away.
+  supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { lock: (name, acquireTimeout, task) => task() }
+  });
   setUpAccounts();
 }
 

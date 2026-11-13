@@ -71,33 +71,53 @@ function afterLogin() {
   }
 }
 
+// Wait for a slow task, but give up after "seconds" so the app never gets
+// stuck forever (e.g. on a bad phone connection). "step" names the task in
+// the error message, so we know which part was slow.
+function withTimeout(promise, seconds, step) {
+  const timer = new Promise((resolve, reject) =>
+    setTimeout(() => reject(new Error(step + " took too long. Check your connection and try again.")), seconds * 1000)
+  );
+  return Promise.race([promise, timer]); // whichever finishes first wins
+}
+
 // SAVE: upload the photo, then add a row to the scans table
 async function saveLastScan() {
   if (!currentUser || !lastScan) return;
   saveButton.disabled = true;
-  saveButtonText.textContent = "Saving…";
+  saveMessage.hidden = true;
 
   try {
-    // a) Upload the photo into the user's own folder, named by the current time
-    const photoPath = `${currentUser.id}/${Date.now()}.jpg`;
-    const photo = await makeSmallJpeg(lastScan.file);
-    const upload = await supabaseClient.storage
-      .from(PHOTO_BUCKET)
-      .upload(photoPath, photo, { contentType: "image/jpeg" });
-    if (upload.error) throw upload.error;
+    // a) Make a small copy of the photo
+    saveButtonText.textContent = "Preparing photo…";
+    const photo = await withTimeout(makeSmallJpeg(lastScan.file), 20, "Preparing the photo");
+    if (!photo) throw new Error("Couldn't prepare the photo.");
 
-    // b) Save the results. We only keep what we need to show them again later.
+    // b) Upload it into the user's own folder, named by the current time
+    saveButtonText.textContent = "Uploading photo…";
+    const photoPath = `${currentUser.id}/${Date.now()}.jpg`;
+    const upload = await withTimeout(
+      supabaseClient.storage.from(PHOTO_BUCKET).upload(photoPath, photo, { contentType: "image/jpeg" }),
+      45, "Uploading the photo"
+    );
+    if (upload.error) throw upload.error;
+    saveButtonText.textContent = "Saving results…";
+
+    // c) Save the results. We only keep what we need to show them again later.
     const found = lastScan.found.map((item) => ({
       name: item.polymer.name,
       level: item.polymer.level,
       foundAs: item.foundAs
     }));
-    const insert = await supabaseClient.from("scans").insert({
-      scanned_text: lastScan.text,
-      found: found,
-      photo_path: photoPath
-      // user_id and created_at are filled in automatically by the database
-    });
+    const insert = await withTimeout(
+      supabaseClient.from("scans").insert({
+        scanned_text: lastScan.text,
+        found: found,
+        photo_path: photoPath
+        // user_id and created_at are filled in automatically by the database
+      }),
+      30, "Saving the results"
+    );
     if (insert.error) throw insert.error;
 
     lastScan = null; // saved — don't save the same scan twice
