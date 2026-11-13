@@ -27,7 +27,8 @@ synthetic polymers that shed microplastics.
 | File | What it does |
 |---|---|
 | `index.html` | Page structure |
-| `style.css` | Look and layout |
+| `style.css` | Look and layout (designed in Figma Make) |
+| `screens.js` | Shows one screen at a time (Home, Scanning, Results…) and draws the icons |
 | `polymers.js` | The watch-list, with a source for every entry |
 | `app.js` | Scanning: photo → OCR → results |
 | `supabase-config.js` | Supabase project URL and **public** (publishable) key |

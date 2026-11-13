@@ -2,12 +2,19 @@
 <!--
   index.html — the STRUCTURE of the page (what is on the screen).
   style.css  — the LOOK of the page (colors, spacing, fonts).
+  screens.js — shows ONE screen at a time (Home, Scanning, Results…) and draws the icons.
   polymers.js — the LIST of plastic ingredients we search for.
   app.js     — the BEHAVIOR of scanning (photo -> text -> results).
   supabase-config.js — the address and public key of our Supabase project.
   auth.js    — optional ACCOUNTS: sign up, log in, log out (uses Supabase).
   saving.js  — SAVE scans and photos, and show "My saved scans" (uses Supabase).
   supabase-setup.sql — run once in Supabase to create the table, photo bucket and security rules.
+
+  The page is split into "screens" (<section class="screen">). Only one is
+  visible at a time; screens.js hides the others. Every screen has a name
+  (data-screen="…") that also appears in the address bar (e.g. #results),
+  so the phone's Back button works.
+  <span data-icon="camera"></span> is a placeholder that screens.js fills with an icon.
 -->
 <html lang="en">
 <head>
@@ -15,139 +22,321 @@
   <!-- Makes the page fit phone screens properly -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Microplastic Minimizer</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <!-- Nunito: the rounded font from the Figma design (free, from Google Fonts) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
-  <header>
-    <!-- Account bar: shows "Log in", or your email + "Log out" once logged in.
-         Hidden until Supabase is set up in supabase-config.js. -->
-    <div id="account-bar" hidden>
-      <span id="account-email"></span>
-      <button id="login-open-button" class="link-button">Log in</button>
-      <button id="logout-button" class="link-button" hidden>Log out</button>
-    </div>
-    <h1>🔬 Microplastic Minimizer</h1>
-    <p class="tagline">Snap a photo of an ingredient list or clothing tag. We'll flag hidden plastics.</p>
-  </header>
 
-  <main>
-    <!-- LOG IN / SIGN UP (optional). Hidden until you press "Log in". -->
-    <section id="auth-card" class="card" hidden>
-      <h2>Log in or create an account</h2>
-      <p class="hint">Accounts are optional — you only need one to save your scans.</p>
-      <!-- A <form> lets people press Enter to submit, and lets the browser offer saved passwords -->
-      <form id="auth-form">
-        <label for="auth-email">Email</label>
-        <input type="email" id="auth-email" autocomplete="email" required>
+  <!-- The two hidden file pickers. Any button with for="camera-input" or
+       for="library-input" opens them, on any screen.
+       capture="environment" tells phones to open the BACK camera straight away. -->
+  <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+  <input type="file" id="library-input" accept="image/*" hidden>
 
-        <label for="auth-password">Password (at least 6 characters)</label>
-        <input type="password" id="auth-password" autocomplete="current-password" minlength="6" required>
 
-        <div class="auth-buttons">
-          <button type="submit" class="button">Log in</button>
-          <button type="button" id="signup-button" class="button secondary">Create account</button>
-          <button type="button" id="auth-cancel-button" class="link-button dark">Cancel</button>
+  <!-- ==================== SCREEN: HOME ==================== -->
+  <section class="screen" data-screen="home">
+    <header class="topbar topbar-home">
+      <a class="brand" href="#home">
+        <span class="brand-mark" data-icon="leaf"></span>
+        <span class="brand-name">Microplastic<strong>Minimizer</strong></span>
+      </a>
+      <!-- Account links: hidden until Supabase is set up in supabase-config.js -->
+      <nav id="account-bar" class="account-bar" hidden>
+        <a id="login-open-button" class="text-link" href="#login">Log in</a>
+        <a id="my-scans-button" class="text-link" href="#saved" hidden>My scans</a>
+        <button id="logout-button" class="text-link muted" hidden>Log out</button>
+      </nav>
+    </header>
+
+    <main class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">Know what you use</p>
+        <h1>What's hiding in your products?</h1>
+        <p class="lead">Snap an ingredient list or clothing tag. We'll flag hidden plastics.</p>
+
+        <div class="photo-buttons">
+          <label class="btn btn-primary" for="camera-input"><span data-icon="camera"></span>Take a photo</label>
+          <label class="btn btn-secondary" for="library-input"><span data-icon="image"></span>Choose from photos</label>
         </div>
-      </form>
-      <!-- Success or error messages appear here -->
-      <p id="auth-message" class="auth-message" hidden></p>
-    </section>
 
-    <!-- STEP 1: Choose a photo -->
-    <section class="card">
-      <h2>1. Add a photo</h2>
-      <!-- accept="image/*" lets phones offer "Take Photo" or "Photo Library" -->
-      <!-- Two buttons, two hidden file pickers:
-           capture="environment" tells phones to open the BACK camera straight away.
-           Without it, phones open the photo library instead. -->
-      <div class="photo-buttons">
-        <label class="button" for="camera-input">📷 Take a photo</label>
-        <label class="button secondary" for="library-input">🖼️ Choose from photos</label>
-      </div>
-      <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
-      <input type="file" id="library-input" accept="image/*" hidden>
-
-      <!-- The chosen photo is shown here so you can check it is readable -->
-      <img id="photo-preview" alt="Your photo" hidden>
-
-      <!-- Progress bar while the text reader (OCR) works -->
-      <div id="progress-area" hidden>
-        <p id="progress-label">Reading text…</p>
-        <progress id="progress-bar" max="100" value="0"></progress>
-      </div>
-    </section>
-
-    <!-- STEP 2: Results -->
-    <section class="card">
-      <h2>2. Results</h2>
-      <div id="results">
-        <p class="hint">No scan yet.</p>
+        <div class="chips">
+          <span class="chip"><span data-icon="sun"></span>Good light</span>
+          <span class="chip"><span data-icon="frame"></span>Fill the frame</span>
+        </div>
       </div>
 
-      <!-- SAVE: appears after a scan. Logged in → "Save this scan".
-           Logged out → "Log in to save". -->
-      <div id="save-area" hidden>
-        <button id="save-button" class="button">💾 Save this scan</button>
-        <button id="save-login-button" class="button secondary">Log in to save this scan</button>
-        <p id="save-message" class="auth-message" hidden></p>
+      <!-- Decorative drawing of two bottles (aria-hidden: screen readers skip it) -->
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 360 360">
+          <circle cx="180" cy="180" r="170" fill="#E5F1EB"/>
+          <circle cx="180" cy="180" r="128" fill="none" stroke="#D3E6DC" stroke-width="2"/>
+          <path d="M60 128h16M68 120v16M276 82h20M286 72v20" stroke="#8DB6A3" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="110" cy="268" r="6" fill="#C9DDD3"/>
+          <circle cx="262" cy="96" r="5" fill="#fff"/>
+          <!-- back bottle -->
+          <rect x="118" y="104" width="34" height="22" rx="6" fill="#2E7D5B"/>
+          <rect x="96" y="120" width="96" height="158" rx="22" fill="#DCEDE4" stroke="#A9CBBA" stroke-width="2"/>
+          <rect x="114" y="172" width="58" height="36" rx="9" fill="#fff" opacity=".85"/>
+          <!-- front bottle -->
+          <rect x="200" y="90" width="50" height="26" rx="7" fill="#8DBBA6"/>
+          <rect x="164" y="108" width="122" height="186" rx="24" fill="#fff" stroke="#A9CBBA" stroke-width="2"/>
+          <rect x="196" y="186" width="54" height="10" rx="3" fill="#2E7D5B"/>
+          <rect x="190" y="208" width="68" height="5" rx="2.5" fill="#B7CFC4"/>
+          <rect x="190" y="222" width="68" height="5" rx="2.5" fill="#B7CFC4"/>
+          <!-- leaf -->
+          <g transform="translate(268 262) scale(1.6)" fill="none" stroke="#2E7D5B" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19.5 4.5C13 4.4 7.2 6.6 5 11.2c-1.5 3.2.4 6.9 3.9 7.3 5.7.6 9.7-6.2 10.6-14Z"/>
+            <path d="M4 21c2.3-4.9 5.8-8 10.8-10.4"/>
+          </g>
+        </svg>
       </div>
-    </section>
+    </main>
 
-    <!-- MY SAVED SCANS: only shown when logged in -->
-    <section id="saved-card" class="card" hidden>
-      <h2>My saved scans</h2>
-      <ul id="saved-list"></ul>
-    </section>
+    <footer class="home-footer">
+      <a class="text-link" href="#how"><span data-icon="info"></span>How do we know?<span data-icon="chevronRight"></span></a>
+      <p class="fineprint">Educational project. The watch-list is not exhaustive — always double-check labels.</p>
+    </footer>
+  </section>
 
-    <!-- SOURCES: answers "how do you know?" -->
-    <section class="card sources">
-      <h2>Where our list comes from</h2>
-      <p>
-        <strong>Microplastic</strong> (red) = on the Beat the Microbead <em>Red List</em>,
-        or a synthetic fabric fiber that sheds in the wash.
-        <strong>Watch</strong> (amber) = on the <em>Orange List</em>: synthetic polymers
-        where it's still unclear whether they break down in nature.
-      </p>
-      <ul>
-        <li>
-          <a href="https://www.beatthemicrobead.org/guide-to-microplastics/red-list/" target="_blank" rel="noopener">Beat the Microbead – Red List</a>
-          (Plastic Soup Foundation; based on UNEP, Tauw and ECHA research)
-        </li>
-        <li>
-          <a href="https://www.beatthemicrobead.org/guide-to-microplastics/orange-list/" target="_blank" rel="noopener">Beat the Microbead – Orange List</a>
-        </li>
-        <li>
-          <a href="https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-303/section-303.7" target="_blank" rel="noopener">US FTC – generic names for manufactured fibers (16 CFR 303.7)</a>
-        </li>
-        <li>
-          <a href="https://doi.org/10.1016/j.marpolbul.2016.09.025" target="_blank" rel="noopener">Napper &amp; Thompson (2016)</a>,
-          "Release of synthetic microplastic plastic fibres from domestic washing machines", Marine Pollution Bulletin
-        </li>
+
+  <!-- ==================== SCREEN: SCANNING ==================== -->
+  <section class="screen" data-screen="scanning" hidden>
+    <header class="topbar topbar-center">
+      <span class="brand">
+        <span class="brand-mark" data-icon="leaf"></span>
+        <span class="brand-name">Microplastic<strong>Minimizer</strong></span>
+      </span>
+    </header>
+    <main class="page page-wide center">
+      <p class="eyebrow">Analyzing your photo</p>
+      <h2 class="title">Looking closely…</h2>
+      <p class="lead small">We're reading each ingredient and checking it against our watch-list.</p>
+
+      <!-- Your photo, with corner brackets and a moving "scan line" on top -->
+      <div class="scan-frame">
+        <img id="photo-preview" alt="Your photo">
+        <span class="scan-line"></span>
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+      </div>
+
+      <!-- Progress while the text reader (OCR) works -->
+      <div class="card progress-card">
+        <div class="progress-head">
+          <span class="pulse-dot"></span>
+          <strong id="progress-label">Getting ready…</strong>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-track"><div id="progress-fill"></div></div>
+        <p class="hint">The first scan takes a little longer.</p>
+      </div>
+    </main>
+  </section>
+
+
+  <!-- ==================== SCREEN: RESULTS ==================== -->
+  <section class="screen" data-screen="results" hidden>
+    <header class="topbar">
+      <a class="icon-button" href="#home" aria-label="Back to home"><span data-icon="chevronLeft"></span></a>
+      <span class="topbar-title">Your results</span>
+      <a class="brand-mark small" href="#home" aria-label="Home" data-icon="leaf"></a>
+    </header>
+
+    <main class="results-layout">
+      <!-- Your photo + "scan complete" -->
+      <div class="scan-meta">
+        <div class="thumb-wrap">
+          <img id="result-thumb" alt="Your scanned label">
+          <span class="thumb-check" data-icon="check"></span>
+        </div>
+        <div>
+          <p class="eyebrow">Scan complete</p>
+          <h2 class="title-sm">Your label</h2>
+          <p class="muted" id="result-meta"></p>
+        </div>
+      </div>
+
+      <!-- Summary banner (red = plastics found, green = all clear) -->
+      <div id="verdict" class="verdict"></div>
+
+      <!-- One card per polymer found -->
+      <section class="results-list">
+        <div class="list-head">
+          <h2 class="title">What we found</h2>
+          <span class="muted" id="found-count"></span>
+        </div>
+        <div id="result-cards"></div>
+      </section>
+
+      <!-- Save + scan again -->
+      <div class="results-actions">
+        <button id="save-button" class="btn btn-primary btn-block" hidden><span data-icon="bookmark"></span><span id="save-button-text">Save scan</span></button>
+        <label class="btn btn-secondary btn-block" for="camera-input"><span data-icon="camera"></span>Scan another</label>
+        <p id="save-message" class="notice" hidden></p>
+      </div>
+    </main>
+  </section>
+
+
+  <!-- ==================== SCREEN: COULDN'T READ PHOTO ==================== -->
+  <section class="screen" data-screen="error" hidden>
+    <header class="topbar">
+      <a class="icon-button" href="#home" aria-label="Back to home"><span data-icon="chevronLeft"></span></a>
+      <span class="topbar-title">Scan</span>
+      <a class="brand-mark small" href="#home" aria-label="Home" data-icon="leaf"></a>
+    </header>
+    <main class="page center">
+      <span class="icon-tile amber" data-icon="searchX"></span>
+      <h2 class="title">We couldn't read this photo</h2>
+      <p class="lead small" id="error-detail">We couldn't find any text in it.</p>
+      <ul class="tips card">
+        <li><span data-icon="frame"></span>Move closer so the label fills the frame</li>
+        <li><span data-icon="check"></span>Hold the phone steady so the text is sharp</li>
+        <li><span data-icon="sun"></span>Use good light and avoid glare</li>
+        <li><span data-icon="image"></span>Hold the camera straight, not at an angle</li>
       </ul>
-      <p class="hint">
-        There is no official complete list of microplastic ingredients. We check for the
-        most common ones, not all of the 1,000+ on the full lists.
-      </p>
-    </section>
-  </main>
+      <label class="btn btn-primary btn-block" for="camera-input"><span data-icon="camera"></span>Try again</label>
+      <label class="btn btn-secondary btn-block" for="library-input"><span data-icon="image"></span>Choose from photos</label>
+    </main>
+  </section>
 
-  <footer>
-    <p>Educational project. The watch-list is not exhaustive — always double-check labels.</p>
-  </footer>
+
+  <!-- ==================== SCREEN: HOW WE KNOW ==================== -->
+  <section class="screen" data-screen="how" hidden>
+    <header class="topbar">
+      <a class="icon-button" href="#home" aria-label="Back to home"><span data-icon="chevronLeft"></span></a>
+      <span class="topbar-title">How we know</span>
+      <a class="brand-mark small" href="#home" aria-label="Home" data-icon="leaf"></a>
+    </header>
+    <main class="page center">
+      <span class="icon-tile" data-icon="leaf"></span>
+      <p class="eyebrow">Calm, evidence-led guidance</p>
+      <h2 class="title">We translate ingredient lists, not your choices.</h2>
+      <p class="lead small">Our scanner compares the text in your photo with independent, published ingredient lists and research.</p>
+
+      <ol class="steps">
+        <li class="card"><span class="step-number">1</span><div><strong>Read</strong><p>We extract the visible ingredient names from your photo.</p></div></li>
+        <li class="card"><span class="step-number">2</span><div><strong>Compare</strong><p>Each term is checked against microplastic and watch lists.</p></div></li>
+        <li class="card"><span class="step-number">3</span><div><strong>Explain</strong><p>We show what matched, why it matters, and our source.</p></div></li>
+      </ol>
+
+      <p class="note"><span data-icon="info"></span><span>“Watch” means the evidence or definition is still debated — not that a product is unsafe.</span></p>
+
+      <a class="btn btn-secondary btn-block" href="#sources"><span data-icon="external"></span>Where our list comes from</a>
+      <a class="btn btn-primary btn-block" href="#home">Got it</a>
+    </main>
+  </section>
+
+
+  <!-- ==================== SCREEN: OUR SOURCES ==================== -->
+  <section class="screen" data-screen="sources" hidden>
+    <header class="topbar">
+      <a class="icon-button" href="#how" aria-label="Back"><span data-icon="chevronLeft"></span></a>
+      <span class="topbar-title">Our sources</span>
+      <a class="brand-mark small" href="#home" aria-label="Home" data-icon="leaf"></a>
+    </header>
+    <main class="page">
+      <p class="eyebrow">Where our list comes from</p>
+      <h2 class="title">Built from open, trusted research.</h2>
+      <p class="lead small">We combine independent cosmetic ingredient lists, official textile names, and published research to make our results easier to understand.</p>
+
+      <div class="level-card microplastic">
+        <span class="badge high"><span data-icon="alert"></span>Microplastic</span>
+        <p>On the Beat the Microbead Red List (a solid, persistent microplastic), or a synthetic fabric fiber known to shed microplastics in the wash.</p>
+      </div>
+      <div class="level-card watch">
+        <span class="badge watch"><span data-icon="eye"></span>Watch</span>
+        <p>On the Beat the Microbead Orange List: a synthetic polymer where it's still unclear whether it breaks down in nature.</p>
+      </div>
+
+      <h3 class="section-title">Primary sources</h3>
+      <a class="card source-row" href="https://www.beatthemicrobead.org/guide-to-microplastics/red-list/" target="_blank" rel="noopener">
+        <div><strong>Beat the Microbead Red List</strong><p>Known microplastic ingredients in cosmetics and personal care (Plastic Soup Foundation; based on UNEP, Tauw and ECHA research).</p></div>
+        <span class="icon-tile small" data-icon="external"></span>
+      </a>
+      <a class="card source-row" href="https://www.beatthemicrobead.org/guide-to-microplastics/orange-list/" target="_blank" rel="noopener">
+        <div><strong>Beat the Microbead Orange List</strong><p>Debated synthetic polymers, which we label as Watch.</p></div>
+        <span class="icon-tile small" data-icon="external"></span>
+      </a>
+      <a class="card source-row" href="https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-303/section-303.7" target="_blank" rel="noopener">
+        <div><strong>US FTC generic names for manufactured fibers</strong><p>Official names used to identify synthetic textile fibers (16 CFR 303.7).</p></div>
+        <span class="icon-tile small" data-icon="external"></span>
+      </a>
+      <a class="card source-row" href="https://doi.org/10.1016/j.marpolbul.2016.09.025" target="_blank" rel="noopener">
+        <div><strong>Napper &amp; Thompson (2016) washing-machine study</strong><p>Research measuring fiber release from clothes during washing (Marine Pollution Bulletin).</p></div>
+        <span class="icon-tile small" data-icon="external"></span>
+      </a>
+
+      <p class="note"><span data-icon="info"></span><span>There is no official complete list of microplastic ingredients. We check for the most common ones, not all of the 1,000+ on the full lists.</span></p>
+    </main>
+  </section>
+
+
+  <!-- ==================== SCREEN: LOG IN / CREATE ACCOUNT ==================== -->
+  <section class="screen" data-screen="login" hidden>
+    <header class="topbar">
+      <a class="icon-button" href="#home" aria-label="Back to home"><span data-icon="chevronLeft"></span></a>
+      <span class="topbar-title" id="auth-bar-title">Log in</span>
+      <a class="brand-mark small" href="#home" aria-label="Home" data-icon="leaf"></a>
+    </header>
+    <main class="page page-narrow center">
+      <span class="icon-tile" data-icon="leaf"></span>
+      <h2 class="title" id="auth-heading">Welcome back</h2>
+      <p class="lead small" id="auth-subheading">Log in to see your saved product scans.</p>
+
+      <!-- A <form> lets people press Enter to submit, and lets the browser offer saved passwords -->
+      <form id="auth-form" class="form">
+        <label for="auth-email">Email address</label>
+        <div class="field"><span data-icon="mail"></span><input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" required></div>
+
+        <label for="auth-password">Password</label>
+        <div class="field"><span data-icon="lock"></span><input type="password" id="auth-password" placeholder="At least 6 characters" autocomplete="current-password" minlength="6" required></div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="auth-submit">Log in</button>
+      </form>
+
+      <!-- Success or error messages appear here -->
+      <p id="auth-message" class="notice" hidden></p>
+
+      <button id="auth-switch" class="text-link underline">New here? Create account</button>
+
+      <p class="note"><span data-icon="info"></span><span><strong>Accounts are optional</strong> — only needed to save scans.</span></p>
+    </main>
+  </section>
+
+
+  <!-- ==================== SCREEN: MY SAVED SCANS ==================== -->
+  <section class="screen" data-screen="saved" hidden>
+    <header class="topbar">
+      <a class="icon-button" href="#home" aria-label="Back to home"><span data-icon="chevronLeft"></span></a>
+      <span class="topbar-title">My saved scans</span>
+      <a class="brand-mark small" href="#home" aria-label="Home" data-icon="leaf"></a>
+    </header>
+    <main class="page">
+      <p class="muted" id="saved-email"></p>
+      <ul id="saved-list" class="saved-list"></ul>
+      <label class="btn btn-primary btn-block" for="camera-input"><span data-icon="camera"></span>Scan a label</label>
+    </main>
+  </section>
+
 
   <!-- Tesseract.js: a free library that reads text from images (OCR).
        Loaded from a CDN (a public server), so there is nothing to install. -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
   <!-- Supabase: a free library that talks to our Supabase project (accounts and saving). -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
-  <!-- Our own code. polymers.js must load before app.js because app.js uses its list,
-       and supabase-config.js must load before auth.js because auth.js uses its settings.
-       "?v=11" is a version number: bump it whenever you change a file, so browsers
+  <!-- Our own code. Order matters: each file can use things from the files above it.
+       "?v=13" is a version number: bump it whenever you change a file, so browsers
        download the new copy instead of reusing an old saved (cached) one. -->
-  <script src="polymers.js?v=11"></script>
-  <script src="app.js?v=11"></script>
-  <script src="supabase-config.js?v=11"></script>
-  <script src="saving.js?v=11"></script>
-  <script src="auth.js?v=11"></script>
+  <script src="screens.js?v=13"></script>
+  <script src="polymers.js?v=13"></script>
+  <script src="app.js?v=13"></script>
+  <script src="supabase-config.js?v=13"></script>
+  <script src="saving.js?v=13"></script>
+  <script src="auth.js?v=13"></script>
 </body>
 </html>

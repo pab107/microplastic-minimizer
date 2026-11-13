@@ -1,20 +1,31 @@
-// app.js — the BEHAVIOR of the page.
-// Flow: user picks photo -> Tesseract reads the text (OCR) -> we search the
-// text for anything in POLYMERS (from polymers.js) -> we show the results.
+// app.js — the BEHAVIOR of scanning.
+// Flow: user picks photo -> Scanning screen while Tesseract reads the text (OCR)
+// -> we search the text for anything in POLYMERS (from polymers.js)
+// -> Results screen (or the "couldn't read" screen).
 
 // ---------- 1. Grab the parts of the page we need to work with ----------
 // document.getElementById finds an element by the id="" we gave it in index.html.
-const cameraInput   = document.getElementById("camera-input");   // "Take a photo"
-const libraryInput  = document.getElementById("library-input");  // "Choose from photos"
-const photoPreview  = document.getElementById("photo-preview");
-const progressArea  = document.getElementById("progress-area");
-const progressLabel = document.getElementById("progress-label");
-const progressBar   = document.getElementById("progress-bar");
-const resultsBox    = document.getElementById("results");
+const cameraInput     = document.getElementById("camera-input");   // "Take a photo"
+const libraryInput    = document.getElementById("library-input");  // "Choose from photos"
+const photoPreview    = document.getElementById("photo-preview");  // photo on the Scanning screen
+const progressLabel   = document.getElementById("progress-label");
+const progressPercent = document.getElementById("progress-percent");
+const progressFill    = document.getElementById("progress-fill");
+const resultThumb     = document.getElementById("result-thumb");   // photo on the Results screen
+const resultMeta      = document.getElementById("result-meta");
+const verdictBox      = document.getElementById("verdict");
+const foundCount      = document.getElementById("found-count");
+const resultsBox      = document.getElementById("result-cards");
+const errorDetail     = document.getElementById("error-detail");
 
 // The most recent scan: the photo file, the text read from it, and what we
 // found. It isn't all shown on the page, but saving.js needs it to save the scan.
 let lastScan = null;
+
+// Which screens make sense right now (screens.js checks these)
+let scanInProgress = false; // the Scanning screen
+let hasResults = false;     // the Results screen
+let hasError = false;       // the "couldn't read this photo" screen
 
 // ---------- 2. The OCR "worker" ----------
 // A worker is a helper that runs Tesseract in the background so the page
@@ -28,16 +39,23 @@ async function getOcrWorker() {
       // Tesseract calls this repeatedly to report progress (0 to 1).
       logger: (message) => {
         if (message.status === "recognizing text") {
-          progressLabel.textContent = "Reading text…";
-          progressBar.value = Math.round(message.progress * 100);
+          setProgress("Reading text…", message.progress);
         } else {
           // Before reading, it loads its engine and language files.
-          progressLabel.textContent = "Getting ready (first scan takes longer)…";
+          setProgress("Getting ready…", 0);
         }
       }
     });
   }
   return ocrWorker;
+}
+
+// Update the progress card on the Scanning screen ("fraction" goes from 0 to 1)
+function setProgress(label, fraction) {
+  const percent = Math.round(fraction * 100);
+  progressLabel.textContent = label;
+  progressPercent.textContent = percent + "%";
+  progressFill.style.width = percent + "%";
 }
 
 // ---------- 3. Prepare the photo ----------
@@ -92,17 +110,11 @@ async function prepareImage(file) {
 // ---------- 4. Read text from an image ----------
 // "async" means this function waits for slow work (OCR) without freezing the page.
 async function readTextFromImage(file) {
-  progressArea.hidden = false;
-  progressBar.value = 0;
-  try {
-    const image = await prepareImage(file);
-    const worker = await getOcrWorker();
-    const result = await worker.recognize(image);
-    return result.data.text;
-  } finally {
-    // "finally" runs whether it worked or failed, so the bar always goes away.
-    progressArea.hidden = true;
-  }
+  setProgress("Getting ready…", 0);
+  const image = await prepareImage(file);
+  const worker = await getOcrWorker();
+  const result = await worker.recognize(image);
+  return result.data.text;
 }
 
 // ---------- 5. Search the text for synthetic polymers ----------
@@ -134,66 +146,82 @@ function findPolymers(text) {
   return found;
 }
 
-// ---------- 6. Show the results on the page ----------
-function showResults(found, text) {
-  resultsBox.innerHTML = ""; // clear old results
+// ---------- 6. Show the results ----------
+// Fills in the Results screen. "photoUrl" is the photo to show at the top.
+// (saving.js also uses this to reopen a saved scan.)
+function showResults(found, text, photoUrl) {
+  resultThumb.src = photoUrl;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  resultMeta.textContent = words + " words read";
 
-  // If no text was read at all, say so instead of a misleading "all clear"
-  if (!text.trim()) {
-    resultsBox.innerHTML = '<p class="hint">We couldn\'t find any text in this photo. Try a closer, sharper, well-lit photo of the label.</p>';
-    return;
-  }
-
-  // Summary banner at the top
-  const summary = document.createElement("div");
+  // Summary banner: red with a warning icon, or green with a check
+  const highCount = found.filter((f) => f.polymer.level === "high").length;
   if (found.length === 0) {
-    summary.className = "summary good";
-    summary.textContent = "✅ No synthetic polymers from our watch-list were found.";
+    verdictBox.className = "verdict good";
+    verdictBox.innerHTML = '<span class="verdict-icon">' + icon("checkCircle") + "</span>" +
+      "<p><strong>No synthetic polymers from our watch-list found.</strong> " +
+      "Our list covers the most common plastics — always double-check labels.</p>";
   } else {
-    const highCount = found.filter((f) => f.polymer.level === "high").length;
-    summary.className = "summary bad";
-    summary.textContent =
-      `⚠️ Found ${found.length} synthetic polymer(s)` +
-      (highCount ? `, ${highCount} that shed microplastics.` : ".");
+    verdictBox.className = "verdict bad";
+    const plural = found.length === 1 ? "polymer" : "polymers";
+    verdictBox.innerHTML = '<span class="verdict-icon">' + icon("alert") + "</span>" +
+      `<p><strong>${found.length} synthetic ${plural} found` +
+      (highCount ? ` — ${highCount} shed microplastics` : "") + "</strong></p>";
   }
-  resultsBox.appendChild(summary);
+  foundCount.textContent = found.length === 1 ? "1 ingredient" : found.length + " ingredients";
 
-  // One colored box per polymer found
+  // One card per polymer found
+  resultsBox.innerHTML = "";
+  if (found.length === 0) {
+    resultsBox.innerHTML = '<div class="card empty-card">' + icon("checkCircle") +
+      "<p>Nothing on our watch-list matched the text in your photo.</p></div>";
+  }
   for (const item of found) {
-    const box = document.createElement("div");
-    box.className = item.polymer.level === "high" ? "flag" : "flag watch";
+    const isHigh = item.polymer.level === "high";
+    const card = document.createElement("article");
+    card.className = "card result-card";
 
-    const title = document.createElement("strong");
-    title.textContent = item.polymer.name;
+    // Name + badge (icon AND word, so it doesn't rely on color alone)
+    const head = document.createElement("div");
+    head.className = "result-head";
+    const name = document.createElement("h3");
+    name.textContent = item.polymer.name;
     const badge = document.createElement("span");
-    badge.className = "badge";
-    badge.textContent = item.polymer.level === "high" ? "Microplastic" : "Watch";
-    title.appendChild(badge);
+    badge.className = isHigh ? "badge high" : "badge watch";
+    badge.innerHTML = icon(isHigh ? "alert" : "eye") + (isHigh ? "Microplastic" : "Watch");
+    head.append(name, badge);
 
-    const why = document.createElement("div");
+    const why = document.createElement("p");
+    why.className = "result-why";
     why.textContent = item.polymer.why;
 
-    const foundAs = document.createElement("div");
-    foundAs.className = "found-as";
-    foundAs.textContent = "Found as: " + item.foundAs.join(", ");
-
-    // Where we got this from, so users can see why it was flagged
-    const source = document.createElement("div");
-    source.className = "found-as";
+    // "Found as: nylon-12   Source: Beat the Microbead Red List"
+    const foot = document.createElement("div");
+    foot.className = "result-foot";
+    const foundAs = document.createElement("span");
+    foundAs.append("Found as: ");
+    const foundWords = document.createElement("strong");
+    foundWords.textContent = item.foundAs.join(", ");
+    foundAs.append(foundWords);
+    const source = document.createElement("a");
+    source.href = "#sources";
     source.textContent = "Source: " + item.polymer.source;
+    foot.append(foundAs, source);
 
-    box.append(title, why, foundAs, source);
-    resultsBox.appendChild(box);
+    card.append(head, why, foot);
+    resultsBox.appendChild(card);
   }
   // Note: we use textContent (not innerHTML) for scanned words, so weird text
   // from a photo can never be treated as code on our page.
 
-  // Flash the results card and scroll to it (on phones it's below the screen)
-  const card = resultsBox.closest(".card");
-  card.classList.remove("flash");
-  void card.offsetWidth; // tiny trick that lets the flash animation restart
-  card.classList.add("flash");
-  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  hasResults = true;
+}
+
+// Show the "We couldn't read this photo" screen with a reason
+function showReadError(reason) {
+  errorDetail.textContent = reason;
+  hasError = true;
+  go("error", true);
 }
 
 // ---------- 7. Connect everything to the buttons ----------
@@ -203,29 +231,38 @@ function showResults(found, text) {
 async function handlePhoto(input) {
   const file = input.files[0];
   if (!file) return;
-
-  // Show the photo on the page
-  photoPreview.src = URL.createObjectURL(file);
-  photoPreview.hidden = false;
-
-  resultsBox.innerHTML = '<p class="hint">Scanning…</p>';
-  try {
-    const text = await readTextFromImage(file);
-    const found = findPolymers(text);
-    showResults(found, text);
-    // Remember this scan, and offer to save it (only if some text was read)
-    lastScan = text.trim() ? { file: file, text: text.trim(), found: found } : null;
-    showSaveArea();
-  } catch (error) {
-    console.error(error);
-    lastScan = null; // don't leave the previous photo's scan behind
-    hideSaveArea();
-    resultsBox.innerHTML = error.message === "unsupported-format"
-      ? '<p class="hint">This photo format can\'t be opened (iPhone .HEIC photos often can\'t). Take a screenshot of the photo, or save it as JPG/PNG, and try again.</p>'
-      : '<p class="hint">Sorry, we could not read that photo. Try a sharper, well-lit picture.</p>';
-  }
   // Clear the picker so choosing the SAME photo again still triggers a scan
   input.value = "";
+
+  // Show the Scanning screen with the photo
+  const photoUrl = URL.createObjectURL(file);
+  photoPreview.src = photoUrl;
+  scanInProgress = true;
+  hasResults = false;
+  hasError = false;
+  lastScan = null; // don't leave the previous photo's scan behind
+  go("scanning");
+
+  try {
+    const text = await readTextFromImage(file);
+    if (!text.trim()) {
+      showReadError("We couldn't find any text in it.");
+    } else {
+      const found = findPolymers(text);
+      showResults(found, text, photoUrl);
+      // Remember this scan, so it can be saved
+      lastScan = { file: file, text: text.trim(), found: found };
+      showSaveArea();
+      go("results", true);
+    }
+  } catch (error) {
+    console.error(error);
+    showReadError(error.message === "unsupported-format"
+      ? "This photo format can't be opened (iPhone .HEIC photos often can't). Take a screenshot of the photo, or save it as JPG/PNG, and try again."
+      : "Something went wrong while reading it.");
+  } finally {
+    scanInProgress = false; // "finally" runs whether it worked or failed
+  }
 }
 
 cameraInput.addEventListener("change", () => handlePhoto(cameraInput));

@@ -8,36 +8,30 @@
 const PHOTO_BUCKET = "scan-photos";
 
 // ---------- 1. Grab the parts of the page we need ----------
-const saveArea        = document.getElementById("save-area");
-const saveButton      = document.getElementById("save-button");
-const saveLoginButton = document.getElementById("save-login-button");
-const saveMessage     = document.getElementById("save-message");
-const savedCard       = document.getElementById("saved-card");
-const savedList       = document.getElementById("saved-list");
+const saveButton     = document.getElementById("save-button");
+const saveButtonText = document.getElementById("save-button-text");
+const saveMessage    = document.getElementById("save-message");
+const savedList      = document.getElementById("saved-list");
+const savedEmail     = document.getElementById("saved-email");
 
-// ---------- 2. The "Save this scan" area under the results ----------
-// app.js calls this after every successful scan. Logged in → show the Save
-// button. Logged out → invite them to log in (only if accounts are set up).
+// True when someone pressed "Save scan" while logged out: we send them to
+// log in first, then come back and finish saving.
+let saveAfterLogin = false;
+
+// ---------- 2. The "Save scan" button on the Results screen ----------
+// app.js calls this after every successful scan.
 function showSaveArea() {
-  if (!supabaseClient || !lastScan) {
-    saveArea.hidden = true;
-    return;
-  }
-  saveArea.hidden = false;
-  saveMessage.hidden = true;
-  saveButton.hidden = !currentUser;
+  saveButton.hidden = !supabaseClient; // no accounts set up → no saving
   saveButton.disabled = false;
-  saveButton.textContent = "💾 Save this scan";
-  saveLoginButton.hidden = !!currentUser;
+  saveButtonText.textContent = "Save scan";
+  saveMessage.hidden = true;
 }
 
-function hideSaveArea() {
-  saveArea.hidden = true;
-}
-
-function showSaveMessage(text, isError) {
-  saveMessage.textContent = text;
-  saveMessage.className = isError ? "auth-message error" : "auth-message";
+// Show a green (success) or red (error) message under the buttons.
+// "html" is only ever our own fixed text, never text from a photo.
+function showSaveMessage(html, isError) {
+  saveMessage.innerHTML = html;
+  saveMessage.className = isError ? "notice error" : "notice";
   saveMessage.hidden = false;
 }
 
@@ -55,11 +49,33 @@ async function makeSmallJpeg(file) {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
 }
 
+// "Save scan" pressed
+saveButton.addEventListener("click", () => {
+  if (!currentUser) {
+    // Not logged in: log in first, then auth.js calls afterLogin() below
+    saveAfterLogin = true;
+    go("login");
+    return;
+  }
+  saveLastScan();
+});
+
+// Called by auth.js right after someone logs in
+function afterLogin() {
+  if (saveAfterLogin && lastScan) {
+    saveAfterLogin = false;
+    go("results");
+    saveLastScan();
+  } else {
+    go("home");
+  }
+}
+
 // SAVE: upload the photo, then add a row to the scans table
-saveButton.addEventListener("click", async () => {
+async function saveLastScan() {
   if (!currentUser || !lastScan) return;
   saveButton.disabled = true;
-  saveButton.textContent = "Saving…";
+  saveButtonText.textContent = "Saving…";
 
   try {
     // a) Upload the photo into the user's own folder, named by the current time
@@ -84,32 +100,26 @@ saveButton.addEventListener("click", async () => {
     });
     if (insert.error) throw insert.error;
 
-    saveButton.textContent = "✓ Saved";
-    showSaveMessage("Saved! You'll find it under “My saved scans” below.", false);
+    lastScan = null; // saved — don't save the same scan twice
+    saveButtonText.textContent = "Saved";
+    showSaveMessage('Saved! <a href="#saved">See my saved scans</a>', false);
     refreshSavedScans();
   } catch (error) {
     console.error(error);
     saveButton.disabled = false;
-    saveButton.textContent = "💾 Save this scan";
-    showSaveMessage("Couldn't save: " + error.message, true);
+    saveButtonText.textContent = "Save scan";
+    // error.message comes from Supabase, so we add it as plain text
+    showSaveMessage("Couldn't save: ", true);
+    saveMessage.append(error.message);
   }
-});
-
-// "Log in to save": open the login form at the top of the page
-saveLoginButton.addEventListener("click", () => {
-  document.getElementById("login-open-button").click();
-  window.scrollTo({ top: 0, behavior: "smooth" });
-});
+}
 
 // ---------- 3. "My saved scans" ----------
 // Called by auth.js whenever someone logs in or out, and after each save.
 async function refreshSavedScans() {
-  if (!supabaseClient || !currentUser) {
-    savedCard.hidden = true;
-    savedList.innerHTML = "";
-    return;
-  }
-  savedCard.hidden = false;
+  savedList.innerHTML = "";
+  if (!supabaseClient || !currentUser) return;
+  savedEmail.textContent = "Signed in as " + currentUser.email;
 
   // Get this user's scans, newest first. (The security rules make sure
   // Supabase only ever returns the logged-in user's own scans.)
@@ -118,14 +128,14 @@ async function refreshSavedScans() {
     .select("*")
     .order("created_at", { ascending: false });
 
-  savedList.innerHTML = "";
   if (error) {
     console.error(error);
-    savedList.innerHTML = '<li class="hint">Couldn\'t load your saved scans. Has supabase-setup.sql been run?</li>';
+    savedList.innerHTML = '<li class="card empty-card"><p>Couldn\'t load your saved scans. Please try again later.</p></li>';
     return;
   }
   if (scans.length === 0) {
-    savedList.innerHTML = '<li class="hint">No saved scans yet. Scan a label and press “Save this scan”.</li>';
+    savedList.innerHTML = '<li class="card empty-card">' + icon("bookmark") +
+      "<p><strong>No saved scans yet.</strong><br>Scan a label and press “Save scan”.</p></li>";
     return;
   }
 
@@ -149,45 +159,53 @@ async function refreshSavedScans() {
 // Build one row of the "My saved scans" list
 function makeSavedScanItem(scan, photoUrl) {
   const item = document.createElement("li");
-  item.className = "saved-item";
+  item.className = "card saved-item";
 
-  // Thumbnail of the photo
+  // Tapping the row reopens its results (a <button> so keyboards can use it too)
+  const open = document.createElement("button");
+  open.className = "saved-open";
+  open.setAttribute("aria-label", "Open this scan");
+
   const img = document.createElement("img");
   img.className = "saved-thumb";
-  img.alt = "Scanned label";
+  img.alt = "";
   if (photoUrl) img.src = photoUrl;
 
-  // Date + verdict + which plastics were found
   const info = document.createElement("div");
   info.className = "saved-info";
 
-  const date = document.createElement("div");
-  date.className = "found-as";
-  date.textContent = new Date(scan.created_at).toLocaleString();
+  const date = document.createElement("span");
+  date.className = "saved-date";
+  date.textContent = new Date(scan.created_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 
+  // Verdict badge, e.g. "2 microplastics" (red) or "All clear" (green)
   const highCount = scan.found.filter((f) => f.level === "high").length;
   const watchCount = scan.found.length - highCount;
-  const verdict = document.createElement("strong");
+  const verdict = document.createElement("span");
   if (scan.found.length === 0) {
-    verdict.className = "verdict good";
-    verdict.textContent = "✅ All clear";
+    verdict.className = "badge good";
+    verdict.innerHTML = icon("checkCircle") + "All clear";
+  } else if (highCount) {
+    verdict.className = "badge high";
+    verdict.innerHTML = icon("alert") + (highCount === 1 ? "1 microplastic" : highCount + " microplastics");
   } else {
-    verdict.className = "verdict bad";
-    verdict.textContent = [
-      highCount ? `⚠️ ${highCount} microplastic` : "",
-      watchCount ? `👁 ${watchCount} watch` : ""
-    ].filter(Boolean).join(" · ");
+    verdict.className = "badge watch";
+    verdict.innerHTML = icon("eye") + watchCount + " watch";
   }
 
-  const names = document.createElement("div");
+  const names = document.createElement("span");
+  names.className = "saved-names";
   names.textContent = scan.found.map((f) => f.name).join(", ");
 
   info.append(date, verdict, names);
+  open.append(img, info);
+  open.addEventListener("click", () => reopenScan(scan, photoUrl));
 
   // Delete button: removes the photo and the row
   const deleteButton = document.createElement("button");
-  deleteButton.className = "link-button dark";
-  deleteButton.textContent = "Delete";
+  deleteButton.className = "icon-button danger";
+  deleteButton.setAttribute("aria-label", "Delete this scan");
+  deleteButton.innerHTML = icon("trash");
   deleteButton.addEventListener("click", async () => {
     if (!confirm("Delete this saved scan? This can't be undone.")) return;
     deleteButton.disabled = true;
@@ -204,6 +222,23 @@ function makeSavedScanItem(scan, photoUrl) {
     }
   });
 
-  item.append(img, info, deleteButton);
+  item.append(open, deleteButton);
   return item;
+}
+
+// Show a saved scan on the Results screen again
+function reopenScan(scan, photoUrl) {
+  // Saved rows only store name, level and "found as"; look up the rest
+  // (explanation and source) from today's watch-list in polymers.js.
+  const found = scan.found.map((f) => ({
+    polymer: POLYMERS.find((p) => p.name === f.name) || { name: f.name, level: f.level, why: "", source: "" },
+    foundAs: f.foundAs
+  }));
+  showResults(found, scan.scanned_text || "", photoUrl || "");
+  lastScan = null;
+  saveButton.hidden = false;
+  saveButton.disabled = true;
+  saveButtonText.textContent = "Saved";
+  saveMessage.hidden = true;
+  go("results");
 }

@@ -4,7 +4,7 @@
 
 // ---------- 1. Connect to our Supabase project ----------
 // supabaseClient is our "phone line" to Supabase. currentUser is the person
-// logged in right now (or null if nobody is). Step 3 (saving) will use both.
+// logged in right now (or null if nobody is). saving.js uses both.
 let supabaseClient = null;
 let currentUser = null;
 
@@ -24,29 +24,42 @@ if (!supabaseIsSetUp) {
 function setUpAccounts() {
   // Grab the parts of the page we need
   const accountBar      = document.getElementById("account-bar");
-  const accountEmail    = document.getElementById("account-email");
   const loginOpenButton = document.getElementById("login-open-button");
+  const myScansButton   = document.getElementById("my-scans-button");
   const logoutButton    = document.getElementById("logout-button");
-  const authCard        = document.getElementById("auth-card");
   const authForm        = document.getElementById("auth-form");
   const emailInput      = document.getElementById("auth-email");
   const passwordInput   = document.getElementById("auth-password");
-  const signupButton    = document.getElementById("signup-button");
-  const cancelButton    = document.getElementById("auth-cancel-button");
+  const submitButton    = document.getElementById("auth-submit");
+  const switchButton    = document.getElementById("auth-switch");
+  const barTitle        = document.getElementById("auth-bar-title");
+  const heading         = document.getElementById("auth-heading");
+  const subheading      = document.getElementById("auth-subheading");
   const authMessage     = document.getElementById("auth-message");
 
-  accountBar.hidden = false; // Supabase is set up, so show the account bar
+  accountBar.hidden = false; // Supabase is set up, so show the account links
+
+  // The login screen has two modes: "login" and "signup" (create account).
+  // The switch link under the form flips between them.
+  let mode = "login";
+  function setMode(newMode) {
+    mode = newMode;
+    const signup = mode === "signup";
+    barTitle.textContent      = signup ? "Create account" : "Log in";
+    heading.textContent       = signup ? "Create your account" : "Welcome back";
+    subheading.textContent    = signup ? "Save your scans and see them on any device." : "Log in to see your saved product scans.";
+    submitButton.textContent  = signup ? "Create account" : "Log in";
+    switchButton.textContent  = signup ? "Already have an account? Log in" : "New here? Create account";
+    passwordInput.autocomplete = signup ? "new-password" : "current-password";
+    authMessage.hidden = true;
+  }
+  switchButton.addEventListener("click", () => setMode(mode === "login" ? "signup" : "login"));
 
   // Show a green (success) or red (error) message under the form
   function showMessage(text, isError) {
     authMessage.textContent = text;
-    authMessage.className = isError ? "auth-message error" : "auth-message";
+    authMessage.className = isError ? "notice error" : "notice";
     authMessage.hidden = false;
-  }
-
-  // Grey out the buttons while we wait for Supabase, so nobody double-clicks
-  function setBusy(busy) {
-    for (const button of authForm.querySelectorAll("button")) button.disabled = busy;
   }
 
   // Turn Supabase's technical error messages into plain English
@@ -60,22 +73,16 @@ function setUpAccounts() {
     return "Something went wrong: " + message;
   }
 
-  // Update the header to match who is logged in
+  // Update the Home screen's links to match who is logged in
   function updateAccountBar(user) {
     currentUser = user;
-    if (user) {
-      accountEmail.textContent = user.email;
-      loginOpenButton.hidden = true;
-      logoutButton.hidden = false;
-      authCard.hidden = true;
-    } else {
-      accountEmail.textContent = "";
-      loginOpenButton.hidden = false;
-      logoutButton.hidden = true;
-    }
-    // Tell saving.js too: show/hide "My saved scans" and the Save button
+    loginOpenButton.hidden = !!user;
+    myScansButton.hidden = !user;
+    logoutButton.hidden = !user;
+    // Tell saving.js too, then re-check the current screen
+    // (e.g. "My saved scans" only makes sense when logged in)
     refreshSavedScans();
-    showSaveArea();
+    route();
   }
 
   // Supabase tells us whenever someone logs in or out — including right when
@@ -84,60 +91,50 @@ function setUpAccounts() {
     updateAccountBar(session ? session.user : null);
   });
 
-  // "Log in" in the header: show the login form
-  loginOpenButton.addEventListener("click", () => {
-    authCard.hidden = false;
-    authMessage.hidden = true;
-    emailInput.focus();
-  });
-
-  // "Cancel": hide the form again
-  cancelButton.addEventListener("click", () => {
-    authCard.hidden = true;
-  });
-
-  // LOG IN (the form's main button, or pressing Enter)
+  // The form's button (or pressing Enter): log in OR create an account
   authForm.addEventListener("submit", async (event) => {
     event.preventDefault(); // stop the browser from reloading the page
-    setBusy(true);
-    const { error } = await supabaseClient.auth.signInWithPassword({
-      email: emailInput.value.trim(),
-      password: passwordInput.value
-    });
-    setBusy(false);
-    if (error) {
-      showMessage(friendlyError(error), true);
-    } else {
-      authForm.reset(); // clear the boxes; onAuthStateChange updates the header
-    }
-  });
+    submitButton.disabled = true;
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
 
-  // CREATE ACCOUNT
-  signupButton.addEventListener("click", async () => {
-    // Use the browser's built-in checks (valid email, 6+ character password)
-    if (!authForm.reportValidity()) return;
-    setBusy(true);
-    const { data, error } = await supabaseClient.auth.signUp({
-      email: emailInput.value.trim(),
-      password: passwordInput.value,
-      // After clicking the confirmation email, come back to this page
-      options: { emailRedirectTo: window.location.origin + window.location.pathname }
-    });
-    setBusy(false);
-    if (error) {
-      showMessage(friendlyError(error), true);
-    } else if (!data.session) {
-      // Supabase requires email confirmation: no login until they click the link
-      showMessage("Account created! Check your email and click the confirmation link, then log in here.", false);
+    if (mode === "login") {
+      // LOG IN
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      submitButton.disabled = false;
+      if (error) {
+        showMessage(friendlyError(error), true);
+        return;
+      }
       authForm.reset();
+      afterLogin(); // saving.js: finish a pending save, or go Home
     } else {
-      // Email confirmation is turned off, so they're logged in straight away
-      authForm.reset();
+      // CREATE ACCOUNT
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        // After clicking the confirmation email, come back to this page
+        options: { emailRedirectTo: window.location.origin + window.location.pathname }
+      });
+      submitButton.disabled = false;
+      if (error) {
+        showMessage(friendlyError(error), true);
+      } else if (!data.session) {
+        // Supabase requires email confirmation: no login until they click the link
+        authForm.reset();
+        setMode("login");
+        showMessage("Account created! Check your email and click the confirmation link, then log in here.", false);
+      } else {
+        // Email confirmation is turned off, so they're logged in straight away
+        authForm.reset();
+        afterLogin();
+      }
     }
   });
 
   // LOG OUT
   logoutButton.addEventListener("click", async () => {
     await supabaseClient.auth.signOut();
+    go("home");
   });
 }
